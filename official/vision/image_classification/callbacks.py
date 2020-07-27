@@ -49,7 +49,7 @@ def get_callbacks(model_checkpoint: bool = True,
     callbacks.append(
         tf.keras.callbacks.TensorBoard(
             log_dir=model_dir,
-            profile_batch='0'))
+            profile_batch='1'))
   if time_history:
     callbacks.append(
         keras_utils.TimeHistory(
