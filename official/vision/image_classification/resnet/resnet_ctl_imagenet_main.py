@@ -39,6 +39,8 @@ flags.DEFINE_boolean(name='use_tf_function', default=True,
 flags.DEFINE_boolean(name='single_l2_loss_op', default=False,
                      help='Calculate L2_loss on concatenated weights, '
                      'instead of using Keras per-layer L2 loss.')
+flags.DEFINE_boolean(name='enable_mlir', default=False,
+                     help='Whether or not to enable MLIR compilation.')
 
 
 def build_stats(runnable, time_callback):
@@ -98,6 +100,14 @@ def run(flags_obj):
   Returns:
     Dictionary of training and eval stats.
   """
+  if flags_obj.enable_mlir:
+    logging.info('Enabling MLIR.')
+    tf.config.experimental.enable_mlir_graph_optimization()
+  try:
+    tf.io.gfile.rmtree(flags_obj.model_dir)
+  except tf.errors.NotFoundError:
+    pass
+
   keras_utils.set_session_config(
       enable_xla=flags_obj.enable_xla)
   performance.set_mixed_precision_policy(flags_core.get_tf_dtype(flags_obj))
