@@ -1,4 +1,3 @@
-# Lint as: python3
 # Copyright 2020 The Orbit Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,8 +15,9 @@
 """A light weight utilities to train TF2 models."""
 
 import time
-from typing import Callable, Optional, Text, Union
+from typing import Callable, Dict, Optional, Text, Union
 from absl import logging
+import numpy as np
 from orbit import runner
 from orbit import utils
 
@@ -71,9 +71,11 @@ class Controller:
         `trainer.train` function will always be enabled. If set, the value
         should be divisible by steps_per_loop.
       summary_dir: The directory to restore and write checkpoints and summaries.
-        If None, it will be set to `checkpoint_manager.directory`.
+        For example, You can set it to `checkpoint_manager.directory`.
+        If None, it will not write training summarizes.
       eval_summary_dir: The directory to write eval summaries. If None, it will
-        be set to `summary_dir`.
+        be set to `summary_dir`. If both `summary_dir` and `eval_summary_dir`
+        are None, it will not write evaluation summarizes.
 
     Raises:
       ValueError: If both `trainer` and `evaluator` are None.
@@ -108,9 +110,6 @@ class Controller:
     self.global_step = global_step
     self.checkpoint_manager = checkpoint_manager
 
-    if summary_dir is None and checkpoint_manager:
-      summary_dir = checkpoint_manager.directory
-
     if self.trainer is not None:
       self.step_timer = None
       self.steps_per_loop = steps_per_loop
@@ -118,7 +117,6 @@ class Controller:
       self.summary_manager = utils.SummaryManager(
           summary_dir, tf.summary.scalar, global_step=self.global_step)
 
-    eval_summary_writer = None
     if self.evaluator is not None:
       eval_summary_dir = eval_summary_dir or summary_dir
       if eval_summary_dir == summary_dir and self.trainer is not None:
@@ -136,13 +134,9 @@ class Controller:
     # TODO(momernick): We probably only want to do this on certain occasions?
     if self.checkpoint_manager is not None:
       checkpoint_interval = self.checkpoint_manager.checkpoint_interval
-      model_restored = self.restore_checkpoint()
-      if not model_restored and (checkpoint_interval and
-                                 self.trainer is not None):
-        # If the model is not restored from a checkpoint, and
-        # `checkpoint_interval` is enabled for training, save an initial
-        # checkpoint.
-        self.save_checkpoint()
+      restored_path = self.restore_checkpoint()
+      if restored_path:
+        logging.info("Restored from checkpoint: %s", restored_path)
 
   def train(self, steps: int, checkpoint_at_completion: bool = True):
     """Runs training.
@@ -177,7 +171,7 @@ class Controller:
     if checkpoint_at_completion:
       self.save_checkpoint()
 
-  def evaluate(self, steps: int = None):
+  def evaluate(self, steps: int = None) -> Optional[Dict[Text, np.number]]:
     """Runs evaluation.
 
     This method calls the `evaluate` method on the Evaluator object for `steps`
@@ -186,10 +180,12 @@ class Controller:
     Args:
       steps: The number of steps to evaluate for.
 
+    Returns:
+      The evaluation results as a dictionary of numpy values.
+
     Raises:
       ValueError: If no checkpoint found in `self.checkpoint_manager.directory`.
       ValueError: If `evaluator` is not provided.
-
     """
     if self.evaluator is None:
       raise ValueError("`evaluator` must be provided to call `evaluate()` "
@@ -204,7 +200,7 @@ class Controller:
     else:
       logging.info("Evaluating at train step: %s", current_step)
 
-    with self.eval_summary_manager.summary_writer.as_default():
+    with self.eval_summary_manager.summary_writer().as_default():
       eval_outputs = self.evaluator.evaluate(steps)
 
     if eval_outputs:
@@ -216,6 +212,8 @@ class Controller:
 
     self.eval_summary_manager.write_summaries(eval_outputs)
     self.eval_summary_manager.flush()
+
+    return eval_outputs
 
   def restore_checkpoint(self, checkpoint_path: Text = None):
     """Restore or initialize the model.
@@ -334,7 +332,7 @@ class Controller:
     current_step += num_steps
     num_steps = tf.convert_to_tensor(num_steps, dtype=tf.int32)
 
-    with self.summary_manager.summary_writer.as_default():
+    with self.summary_manager.summary_writer().as_default():
       # Create a lambda that returns true when summaries should be written.
       should_record = False  # Allows static optimization in no-summary cases.
       if self.summary_interval:
