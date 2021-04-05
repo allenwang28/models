@@ -18,6 +18,8 @@ train_dataset:
   mean_subtract: False
   standardize: False
   dtype: 'bfloat16'
+  augmenter:
+    name: 'autoaugment'
 validation_dataset:
   name: 'imagenet2012'
   data_dir: null
