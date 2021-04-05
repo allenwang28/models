@@ -1,22 +1,18 @@
-# Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+# Copyright 2021 The TensorFlow Authors. All Rights Reserved.
 #
-# Licensed under the Apache License, Version 2.0 (the 'License');
+# Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an 'AS IS' BASIS,
+# distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# ==============================================================================
-"""Misc for Transformer."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+"""Misc for Transformer."""
 
 # pylint: disable=g-bad-import-order
 
@@ -209,6 +205,14 @@ def define_transformer_flags():
       help=flags_core.help_wrap(
           'Whether to do checkpointing during training. When running under '
           'benchmark harness, we will avoid checkpointing.'))
+  flags.DEFINE_bool(
+      name='save_weights_only',
+      default=True,
+      help=flags_core.help_wrap(
+          'Only used when above `enable_checkpointing` is True. '
+          'If True, then only the model\'s weights will be saved '
+          '(`model.save_weights(filepath)`), else the full model is saved '
+          '(`model.save(filepath)`)'))
 
   flags_core.set_defaults(
       data_dir='/tmp/translate_ende',

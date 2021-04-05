@@ -1,4 +1,4 @@
-# Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+# Copyright 2021 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# ==============================================================================
+
 """Tests for masked language model network."""
 
 import numpy as np
@@ -20,7 +20,7 @@ import tensorflow as tf
 from tensorflow.python.keras import keras_parameterized  # pylint: disable=g-direct-tensorflow-import
 
 from official.nlp.modeling.layers import masked_lm
-from official.nlp.modeling.networks import transformer_encoder
+from official.nlp.modeling.networks import bert_encoder
 
 
 # This decorator runs the test in V1, V2-Eager, and V2-Functional mode. It
@@ -36,7 +36,7 @@ class MaskedLMTest(keras_parameterized.TestCase):
     # First, create a transformer stack that we can use to get the LM's
     # vocabulary weight.
     if xformer_stack is None:
-      xformer_stack = transformer_encoder.TransformerEncoder(
+      xformer_stack = bert_encoder.BertEncoder(
           vocab_size=vocab_size,
           num_layers=1,
           hidden_size=hidden_size,
@@ -69,7 +69,7 @@ class MaskedLMTest(keras_parameterized.TestCase):
     sequence_length = 32
     hidden_size = 64
     num_predictions = 21
-    xformer_stack = transformer_encoder.TransformerEncoder(
+    xformer_stack = bert_encoder.BertEncoder(
         vocab_size=vocab_size,
         num_layers=1,
         hidden_size=hidden_size,

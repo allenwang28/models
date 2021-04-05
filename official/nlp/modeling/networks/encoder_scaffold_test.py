@@ -1,4 +1,4 @@
-# Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+# Copyright 2021 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,12 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# ==============================================================================
-"""Tests for transformer-based text encoder network."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+"""Tests for EncoderScaffold network."""
 
 from absl.testing import parameterized
 import numpy as np
@@ -101,6 +97,7 @@ class EncoderScaffoldLayerClassTest(keras_parameterized.TestCase):
         hidden_cls=ValidatedTransformerLayer,
         hidden_cfg=hidden_cfg,
         embedding_cfg=embedding_cfg,
+        layer_norm_before_pooling=True,
         return_all_layer_outputs=return_all_layer_outputs)
     # Create the inputs (note that the first dimension is implicit).
     word_ids = tf.keras.Input(shape=(sequence_length,), dtype=tf.int32)
@@ -131,6 +128,8 @@ class EncoderScaffoldLayerClassTest(keras_parameterized.TestCase):
     # instantiated from the given config properly.
     self.assertNotEmpty(call_list)
     self.assertTrue(call_list[0], "The passed layer class wasn't instantiated.")
+
+    self.assertTrue(hasattr(test_network, "_output_layer_norm"))
 
   def test_network_creation_with_float16_dtype(self):
     tf.keras.mixed_precision.experimental.set_policy("mixed_float16")
@@ -218,16 +217,17 @@ class EncoderScaffoldLayerClassTest(keras_parameterized.TestCase):
         pooler_layer_initializer=tf.keras.initializers.TruncatedNormal(
             stddev=0.02),
         hidden_cfg=hidden_cfg,
-        embedding_cfg=embedding_cfg)
+        embedding_cfg=embedding_cfg,
+        dict_outputs=True)
 
     # Create the inputs (note that the first dimension is implicit).
     word_ids = tf.keras.Input(shape=(sequence_length,), dtype=tf.int32)
     mask = tf.keras.Input(shape=(sequence_length,), dtype=tf.int32)
     type_ids = tf.keras.Input(shape=(sequence_length,), dtype=tf.int32)
-    data, pooled = test_network([word_ids, mask, type_ids])
+    outputs = test_network([word_ids, mask, type_ids])
 
     # Create a model based off of this network:
-    model = tf.keras.Model([word_ids, mask, type_ids], [data, pooled])
+    model = tf.keras.Model([word_ids, mask, type_ids], outputs)
 
     # Invoke the model. We can't validate the output data here (the model is too
     # complex) but this will catch structural runtime errors.
@@ -237,7 +237,8 @@ class EncoderScaffoldLayerClassTest(keras_parameterized.TestCase):
     mask_data = np.random.randint(2, size=(batch_size, sequence_length))
     type_id_data = np.random.randint(
         num_types, size=(batch_size, sequence_length))
-    _ = model.predict([word_id_data, mask_data, type_id_data])
+    preds = model.predict([word_id_data, mask_data, type_id_data])
+    self.assertEqual(preds["pooled_output"].shape, (3, hidden_size))
 
     # Creates a EncoderScaffold with max_sequence_length != sequence_length
     num_types = 7
@@ -272,8 +273,8 @@ class EncoderScaffoldLayerClassTest(keras_parameterized.TestCase):
             stddev=0.02),
         hidden_cfg=hidden_cfg,
         embedding_cfg=embedding_cfg)
-
-    model = tf.keras.Model([word_ids, mask, type_ids], [data, pooled])
+    outputs = test_network([word_ids, mask, type_ids])
+    model = tf.keras.Model([word_ids, mask, type_ids], outputs)
     _ = model.predict([word_id_data, mask_data, type_id_data])
 
   def test_serialize_deserialize(self):

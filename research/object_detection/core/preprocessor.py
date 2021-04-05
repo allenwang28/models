@@ -571,6 +571,8 @@ def random_horizontal_flip(image,
                            keypoint_visibilities=None,
                            densepose_part_ids=None,
                            densepose_surface_coords=None,
+                           keypoint_depths=None,
+                           keypoint_depth_weights=None,
                            keypoint_flip_permutation=None,
                            probability=0.5,
                            seed=None,
@@ -602,6 +604,12 @@ def random_horizontal_flip(image,
                               (y, x) are the normalized image coordinates for a
                               sampled point, and (v, u) is the surface
                               coordinate for the part.
+    keypoint_depths: (optional) rank 2 float32 tensor with shape [num_instances,
+                     num_keypoints] representing the relative depth of the
+                     keypoints.
+    keypoint_depth_weights: (optional) rank 2 float32 tensor with shape
+                            [num_instances, num_keypoints] representing the
+                            weights of the relative depth of the keypoints.
     keypoint_flip_permutation: rank 1 int32 tensor containing the keypoint flip
                                permutation.
     probability: the probability of performing this augmentation.
@@ -631,6 +639,10 @@ def random_horizontal_flip(image,
                         [num_instances, num_points].
     densepose_surface_coords: rank 3 float32 tensor with shape
                               [num_instances, num_points, 4].
+    keypoint_depths: rank 2 float32 tensor with shape [num_instances,
+                     num_keypoints]
+    keypoint_depth_weights: rank 2 float32 tensor with shape [num_instances,
+                            num_keypoints].
 
   Raises:
     ValueError: if keypoints are provided but keypoint_flip_permutation is not.
@@ -707,6 +719,21 @@ def random_horizontal_flip(image,
           flip_densepose_fn,
           lambda: (densepose_part_ids, densepose_surface_coords))
       result.extend(densepose_tensors)
+
+    # flip keypoint depths and weights.
+    if (keypoint_depths is not None and
+        keypoint_flip_permutation is not None):
+      kpt_flip_perm = keypoint_flip_permutation
+      keypoint_depths = tf.cond(
+          do_a_flip_random,
+          lambda: tf.gather(keypoint_depths, kpt_flip_perm, axis=1),
+          lambda: keypoint_depths)
+      keypoint_depth_weights = tf.cond(
+          do_a_flip_random,
+          lambda: tf.gather(keypoint_depth_weights, kpt_flip_perm, axis=1),
+          lambda: keypoint_depth_weights)
+      result.append(keypoint_depths)
+      result.append(keypoint_depth_weights)
 
     return tuple(result)
 
@@ -1049,6 +1076,28 @@ def random_rgb_to_gray(image,
   return image
 
 
+def adjust_gamma(image, gamma=1.0, gain=1.0):
+  """Adjusts the gamma.
+
+  Args:
+    image: rank 3 float32 tensor contains 1 image -> [height, width, channels]
+           with pixel values varying between [0, 255].
+    gamma: the gamma value. Must be a non-negative real number.
+    gain: a constant multiplier.
+
+  Returns:
+    image: image which is the same shape as input image.
+  """
+  with tf.name_scope('AdjustGamma', values=[image]):
+    def _adjust_gamma(image):
+      image = tf.image.adjust_gamma(image / 255, gamma, gain) * 255
+      image = tf.clip_by_value(image, clip_value_min=0.0, clip_value_max=255.0)
+      return image
+
+    image = _augment_only_rgb_channels(image, _adjust_gamma)
+    return image
+
+
 def random_adjust_brightness(image,
                              max_delta=0.2,
                              seed=None,
@@ -1069,7 +1118,6 @@ def random_adjust_brightness(image,
 
   Returns:
     image: image which is the same shape as input image.
-    boxes: boxes which is the same shape as input boxes.
   """
   with tf.name_scope('RandomAdjustBrightness', values=[image]):
     generator_func = functools.partial(tf.random_uniform, [],
@@ -2937,7 +2985,7 @@ def resize_to_range(image,
               for i in range(len(channels))
           ],
           axis=2)
-      new_image.set_shape([max_dimension, max_dimension, 3])
+      new_image.set_shape([max_dimension, max_dimension, len(channels)])
 
     result = [new_image]
     if masks is not None:
@@ -3111,6 +3159,7 @@ def resize_pad_to_multiple(image, masks=None, multiple=1):
     image_height, image_width, num_channels = _get_image_info(image)
     image = image[tf.newaxis, :, :, :]
     image = ops.pad_to_multiple(image, multiple)[0, :, :, :]
+    result = [image]
 
     if masks is not None:
       masks = tf.transpose(masks, (1, 2, 0))
@@ -3118,11 +3167,10 @@ def resize_pad_to_multiple(image, masks=None, multiple=1):
 
       masks = ops.pad_to_multiple(masks, multiple)[0, :, :, :]
       masks = tf.transpose(masks, (2, 0, 1))
+      result.append(masks)
 
-  if masks is None:
-    return image, tf.stack([image_height, image_width, num_channels])
-  else:
-    return image, masks, tf.stack([image_height, image_width, num_channels])
+    result.append(tf.stack([image_height, image_width, num_channels]))
+    return result
 
 
 def scale_boxes_to_pixel_coordinates(image, boxes, keypoints=None):
@@ -4143,6 +4191,7 @@ def random_scale_crop_and_pad_to_square(
     label_weights,
     masks=None,
     keypoints=None,
+    label_confidences=None,
     scale_min=0.1,
     scale_max=2.0,
     output_size=512,
@@ -4176,6 +4225,8 @@ def random_scale_crop_and_pad_to_square(
       as the input `image`.
     keypoints: (optional) rank 3 float32 tensor with shape [num_instances,
       num_keypoints, 2]. The keypoints are in y-x normalized coordinates.
+    label_confidences: (optional) float32 tensor of shape [num_instance]
+      representing the confidence for each box.
     scale_min: float, the minimum value for the random scale factor.
     scale_max: float, the maximum value for the random scale factor.
     output_size: int, the desired (square) output image size.
@@ -4191,9 +4242,8 @@ def random_scale_crop_and_pad_to_square(
     label_weights: rank 1 float32 tensor with shape [num_instances].
     masks: rank 3 float32 tensor with shape [num_instances, height, width]
            containing instance masks.
-
+    label_confidences: confidences for retained boxes.
   """
-
   img_shape = tf.shape(image)
   input_height, input_width = img_shape[0], img_shape[1]
   random_scale = tf.random_uniform([], scale_min, scale_max, seed=seed)
@@ -4258,6 +4308,9 @@ def random_scale_crop_and_pad_to_square(
         keypoints, [0.0, 0.0, 1.0, 1.0])
     return_values.append(keypoints)
 
+  if label_confidences is not None:
+    return_values.append(tf.gather(label_confidences, indices))
+
   return return_values
 
 
@@ -4267,7 +4320,8 @@ def get_default_func_arg_map(include_label_weights=True,
                              include_instance_masks=False,
                              include_keypoints=False,
                              include_keypoint_visibilities=False,
-                             include_dense_pose=False):
+                             include_dense_pose=False,
+                             include_keypoint_depths=False):
   """Returns the default mapping from a preprocessor function to its args.
 
   Args:
@@ -4285,6 +4339,8 @@ def get_default_func_arg_map(include_label_weights=True,
       the keypoint visibilities, too.
     include_dense_pose: If True, preprocessing functions will modify the
       DensePose labels, too.
+    include_keypoint_depths: If True, preprocessing functions will modify the
+      keypoint depth labels, too.
 
   Returns:
     A map from preprocessing functions to the arguments they receive.
@@ -4327,6 +4383,13 @@ def get_default_func_arg_map(include_label_weights=True,
         fields.InputDataFields.groundtruth_dp_part_ids)
     groundtruth_dp_surface_coords = (
         fields.InputDataFields.groundtruth_dp_surface_coords)
+  groundtruth_keypoint_depths = None
+  groundtruth_keypoint_depth_weights = None
+  if include_keypoint_depths:
+    groundtruth_keypoint_depths = (
+        fields.InputDataFields.groundtruth_keypoint_depths)
+    groundtruth_keypoint_depth_weights = (
+        fields.InputDataFields.groundtruth_keypoint_depth_weights)
 
   prep_func_arg_map = {
       normalize_image: (fields.InputDataFields.image,),
@@ -4338,6 +4401,8 @@ def get_default_func_arg_map(include_label_weights=True,
           groundtruth_keypoint_visibilities,
           groundtruth_dp_part_ids,
           groundtruth_dp_surface_coords,
+          groundtruth_keypoint_depths,
+          groundtruth_keypoint_depth_weights,
       ),
       random_vertical_flip: (
           fields.InputDataFields.image,
@@ -4498,7 +4563,8 @@ def get_default_func_arg_map(include_label_weights=True,
            fields.InputDataFields.groundtruth_boxes,
            fields.InputDataFields.groundtruth_classes,
            groundtruth_label_weights, groundtruth_instance_masks,
-           groundtruth_keypoints),
+           groundtruth_keypoints, groundtruth_label_confidences),
+      adjust_gamma: (fields.InputDataFields.image,),
   }
 
   return prep_func_arg_map

@@ -14,6 +14,7 @@
 # ==============================================================================
 
 """Tests for object_detection.core.target_assigner."""
+from absl.testing import parameterized
 import numpy as np
 import tensorflow.compat.v1 as tf
 
@@ -115,6 +116,7 @@ class TargetAssignerTest(test_case.TestCase):
     self.assertEqual(reg_weights_out.dtype, np.float32)
 
   def test_assign_agnostic_with_keypoints(self):
+
     def graph_fn(anchor_means, groundtruth_box_corners,
                  groundtruth_keypoints):
       similarity_calc = region_similarity_calculator.IouSimilarity()
@@ -1234,7 +1236,8 @@ def _array_argmax(array):
   return np.unravel_index(np.argmax(array), array.shape)
 
 
-class CenterNetCenterHeatmapTargetAssignerTest(test_case.TestCase):
+class CenterNetCenterHeatmapTargetAssignerTest(test_case.TestCase,
+                                               parameterized.TestCase):
 
   def setUp(self):
     super(CenterNetCenterHeatmapTargetAssignerTest, self).setUp()
@@ -1261,6 +1264,66 @@ class CenterNetCenterHeatmapTargetAssignerTest(test_case.TestCase):
     self.assertAlmostEqual(1.0, targets[0, 10, 10, 0])
     self.assertEqual((15, 5), _array_argmax(targets[0, :, :, 1]))
     self.assertAlmostEqual(1.0, targets[0, 15, 5, 1])
+
+  @parameterized.parameters(
+      {'keypoint_weights_for_center': [1.0, 1.0, 1.0, 1.0]},
+      {'keypoint_weights_for_center': [0.0, 0.0, 1.0, 1.0]},
+  )
+  def test_center_location_by_keypoints(self, keypoint_weights_for_center):
+    """Test that the centers are at the correct location."""
+    kpts_y = [[0.1, 0.2, 0.3, 0.4], [0.5, 0.6, 0.7, 0.8], [0.0, 0.0, 0.0, 0.0]]
+    kpts_x = [[0.5, 0.6, 0.7, 0.8], [0.1, 0.2, 0.3, 0.4], [0.0, 0.0, 0.0, 0.0]]
+    gt_keypoints_list = [
+        tf.stack([tf.constant(kpts_y), tf.constant(kpts_x)], axis=2)
+    ]
+    kpts_weight = [[1.0, 1.0, 1.0, 1.0], [1.0, 0.0, 1.0, 0.0],
+                   [1.0, 0.0, 1.0, 0.0]]
+    gt_keypoints_weights_list = [tf.constant(kpts_weight)]
+    gt_classes_list = [
+        tf.one_hot([0, 0, 0], depth=1),
+    ]
+    gt_weights_list = [tf.constant([1.0, 1.0, 0.0])]
+
+    def graph_fn():
+      assigner = targetassigner.CenterNetCenterHeatmapTargetAssigner(
+          4,
+          keypoint_class_id=0,
+          keypoint_indices=[0, 1, 2, 3],
+          keypoint_weights_for_center=keypoint_weights_for_center)
+      targets = assigner.assign_center_targets_from_keypoints(
+          80,
+          80,
+          gt_classes_list=gt_classes_list,
+          gt_keypoints_list=gt_keypoints_list,
+          gt_weights_list=gt_weights_list,
+          gt_keypoints_weights_list=gt_keypoints_weights_list)
+      return targets
+
+    targets = self.execute(graph_fn, [])
+
+    if sum(keypoint_weights_for_center) == 4.0:
+      # There should be two peaks at location (5, 13), and (12, 4).
+      #   (5, 13) = ((0.1 + 0.2 + 0.3 + 0.4) / 4 * 80 / 4,
+      #              (0.5 + 0.6 + 0.7 + 0.8) / 4 * 80 / 4)
+      #   (12, 4) = ((0.5 + 0.7) / 2 * 80 / 4,
+      #              (0.1 + 0.3) / 2 * 80 / 4)
+      self.assertEqual((5, 13), _array_argmax(targets[0, :, :, 0]))
+      self.assertAlmostEqual(1.0, targets[0, 5, 13, 0])
+      self.assertEqual((1, 20, 20, 1), targets.shape)
+      targets[0, 5, 13, 0] = 0.0
+      self.assertEqual((12, 4), _array_argmax(targets[0, :, :, 0]))
+      self.assertAlmostEqual(1.0, targets[0, 12, 4, 0])
+    else:
+      # There should be two peaks at location (5, 13), and (12, 4).
+      #   (7, 15) = ((0.3 + 0.4) / 2 * 80 / 4,
+      #              (0.7 + 0.8) / 2 * 80 / 4)
+      #   (14, 6) = (0.7 * 80 / 4, 0.3 * 80 / 4)
+      self.assertEqual((7, 15), _array_argmax(targets[0, :, :, 0]))
+      self.assertAlmostEqual(1.0, targets[0, 7, 15, 0])
+      self.assertEqual((1, 20, 20, 1), targets.shape)
+      targets[0, 7, 15, 0] = 0.0
+      self.assertEqual((14, 6), _array_argmax(targets[0, :, :, 0]))
+      self.assertAlmostEqual(1.0, targets[0, 14, 6, 0])
 
   def test_center_batch_shape(self):
     """Test that the shape of the target for a batch is correct."""
@@ -1681,6 +1744,121 @@ class CenterNetKeypointTargetAssignerTest(test_case.TestCase):
     # Validate the last element's indices and offsets.
     np.testing.assert_array_equal([0, 3, 2], indices[7, :])
     np.testing.assert_array_almost_equal([0.6, 0.4], offsets[7, :])
+
+  def test_assign_keypoint_depths_target(self):
+    def graph_fn():
+      gt_classes_list = [
+          tf.one_hot([0, 1, 0, 1], depth=4),
+      ]
+      coordinates = tf.expand_dims(
+          tf.constant(
+              np.array([[0.1, 0.2, 0.3, 0.4, 0.5],
+                        [float('nan'), 0.7, 0.7, 0.9, 0.4],
+                        [0.4, 0.1, 0.4, 0.2, 0.0],
+                        [float('nan'), 0.0, 0.12, 0.7, 0.4]]),
+              dtype=tf.float32),
+          axis=2)
+      gt_keypoints_list = [tf.concat([coordinates, coordinates], axis=2)]
+      depths = tf.constant(
+          np.array([[0.1, 0.2, 0.3, 0.4, 0.5],
+                    [float('nan'), 0.7, float('nan'), 0.9, 0.4],
+                    [0.4, 0.1, 0.4, 0.2, 0.0],
+                    [0.5, 0.0, 7.0, 0.7, 0.4]]),
+          dtype=tf.float32)
+      gt_keypoint_depths_list = [depths]
+
+      gt_keypoint_depth_weights = tf.constant(
+          np.array([[1.0, 1.0, 1.0, 1.0, 1.0],
+                    [float('nan'), 0.0, 1.0, 0.0, 0.0],
+                    [1.0, 1.0, 1.0, 1.0, 1.0],
+                    [1.0, 1.0, 0.5, 1.0, 1.0]]),
+          dtype=tf.float32)
+      gt_keypoint_depth_weights_list = [gt_keypoint_depth_weights]
+
+      cn_assigner = targetassigner.CenterNetKeypointTargetAssigner(
+          stride=4,
+          class_id=1,
+          keypoint_indices=[0, 2],
+          peak_radius=1)
+      (indices, depths, weights) = cn_assigner.assign_keypoints_depth_targets(
+          height=120,
+          width=80,
+          gt_keypoints_list=gt_keypoints_list,
+          gt_classes_list=gt_classes_list,
+          gt_keypoint_depths_list=gt_keypoint_depths_list,
+          gt_keypoint_depth_weights_list=gt_keypoint_depth_weights_list)
+      return indices, depths, weights
+    indices, depths, weights = self.execute(graph_fn, [])
+
+    # Only the last 5 elements has positive weight.
+    np.testing.assert_array_almost_equal([
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 0.5, 0.5
+    ], weights)
+    # Validate the last 5 elements' depth value.
+    np.testing.assert_array_almost_equal(
+        [7.0, 7.0, 7.0, 7.0, 7.0], depths[35:, 0])
+    self.assertEqual((40, 3), indices.shape)
+    np.testing.assert_array_equal([0, 2, 2], indices[35, :])
+
+  def test_assign_keypoint_depths_per_keypoints(self):
+    def graph_fn():
+      gt_classes_list = [
+          tf.one_hot([0, 1, 0, 1], depth=4),
+      ]
+      coordinates = tf.expand_dims(
+          tf.constant(
+              np.array([[0.1, 0.2, 0.3, 0.4, 0.5],
+                        [float('nan'), 0.7, 0.7, 0.9, 0.4],
+                        [0.4, 0.1, 0.4, 0.2, 0.0],
+                        [float('nan'), 0.0, 0.12, 0.7, 0.4]]),
+              dtype=tf.float32),
+          axis=2)
+      gt_keypoints_list = [tf.concat([coordinates, coordinates], axis=2)]
+      depths = tf.constant(
+          np.array([[0.1, 0.2, 0.3, 0.4, 0.5],
+                    [float('nan'), 0.7, float('nan'), 0.9, 0.4],
+                    [0.4, 0.1, 0.4, 0.2, 0.0],
+                    [0.5, 0.0, 7.0, 0.7, 0.4]]),
+          dtype=tf.float32)
+      gt_keypoint_depths_list = [depths]
+
+      gt_keypoint_depth_weights = tf.constant(
+          np.array([[1.0, 1.0, 1.0, 1.0, 1.0],
+                    [float('nan'), 0.0, 1.0, 0.0, 0.0],
+                    [1.0, 1.0, 1.0, 1.0, 1.0],
+                    [1.0, 1.0, 0.5, 1.0, 1.0]]),
+          dtype=tf.float32)
+      gt_keypoint_depth_weights_list = [gt_keypoint_depth_weights]
+
+      cn_assigner = targetassigner.CenterNetKeypointTargetAssigner(
+          stride=4,
+          class_id=1,
+          keypoint_indices=[0, 2],
+          peak_radius=1,
+          per_keypoint_offset=True)
+      (indices, depths, weights) = cn_assigner.assign_keypoints_depth_targets(
+          height=120,
+          width=80,
+          gt_keypoints_list=gt_keypoints_list,
+          gt_classes_list=gt_classes_list,
+          gt_keypoint_depths_list=gt_keypoint_depths_list,
+          gt_keypoint_depth_weights_list=gt_keypoint_depth_weights_list)
+      return indices, depths, weights
+    indices, depths, weights = self.execute(graph_fn, [])
+
+    # Only the last 5 elements has positive weight.
+    np.testing.assert_array_almost_equal([
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 0.5, 0.5
+    ], weights)
+    # Validate the last 5 elements' depth value.
+    np.testing.assert_array_almost_equal(
+        [7.0, 7.0, 7.0, 7.0, 7.0], depths[35:, 0])
+    self.assertEqual((40, 4), indices.shape)
+    np.testing.assert_array_equal([0, 2, 2, 1], indices[35, :])
 
   def test_assign_keypoints_offset_targets_radius(self):
     def graph_fn():
@@ -2288,6 +2466,215 @@ class CornerOffsetTargetAssignerTest(test_case.TestCase):
     corner_offsets, foreground = self.execute_cpu(graph_fn, [])
     self.assertAllClose(corner_offsets, np.zeros((1, 5, 5, 4)))
     self.assertAllClose(foreground, np.zeros((1, 5, 5)))
+
+
+class CenterNetTemporalOffsetTargetAssigner(test_case.TestCase):
+
+  def setUp(self):
+    super(CenterNetTemporalOffsetTargetAssigner, self).setUp()
+    self._box_center = [0.0, 0.0, 1.0, 1.0]
+    self._box_center_small = [0.25, 0.25, 0.75, 0.75]
+    self._box_lower_left = [0.5, 0.0, 1.0, 0.5]
+    self._box_center_offset = [0.1, 0.05, 1.0, 1.0]
+    self._box_odd_coordinates = [0.1625, 0.2125, 0.5625, 0.9625]
+    self._offset_center = [0.5, 0.4]
+    self._offset_center_small = [0.1, 0.1]
+    self._offset_lower_left = [-0.1, 0.1]
+    self._offset_center_offset = [0.4, 0.3]
+    self._offset_odd_coord = [0.125, -0.125]
+
+  def test_assign_empty_groundtruths(self):
+    """Tests the assign_offset_targets function with empty inputs."""
+    def graph_fn():
+      box_batch = [
+          tf.zeros((0, 4), dtype=tf.float32),
+      ]
+
+      offset_batch = [
+          tf.zeros((0, 2), dtype=tf.float32),
+      ]
+
+      match_flag_batch = [
+          tf.zeros((0), dtype=tf.float32),
+      ]
+
+      assigner = targetassigner.CenterNetTemporalOffsetTargetAssigner(4)
+      indices, temporal_offset, weights = assigner.assign_temporal_offset_targets(
+          80, 80, box_batch, offset_batch, match_flag_batch)
+      return indices, temporal_offset, weights
+    indices, temporal_offset, weights = self.execute(graph_fn, [])
+    self.assertEqual(indices.shape, (0, 3))
+    self.assertEqual(temporal_offset.shape, (0, 2))
+    self.assertEqual(weights.shape, (0,))
+
+  def test_assign_offset_targets(self):
+    """Tests the assign_offset_targets function."""
+    def graph_fn():
+      box_batch = [
+          tf.constant([self._box_center, self._box_lower_left]),
+          tf.constant([self._box_center_offset]),
+          tf.constant([self._box_center_small, self._box_odd_coordinates]),
+      ]
+
+      offset_batch = [
+          tf.constant([self._offset_center, self._offset_lower_left]),
+          tf.constant([self._offset_center_offset]),
+          tf.constant([self._offset_center_small, self._offset_odd_coord]),
+      ]
+
+      match_flag_batch = [
+          tf.constant([1.0, 1.0]),
+          tf.constant([1.0]),
+          tf.constant([1.0, 1.0]),
+      ]
+
+      assigner = targetassigner.CenterNetTemporalOffsetTargetAssigner(4)
+      indices, temporal_offset, weights = assigner.assign_temporal_offset_targets(
+          80, 80, box_batch, offset_batch, match_flag_batch)
+      return indices, temporal_offset, weights
+    indices, temporal_offset, weights = self.execute(graph_fn, [])
+    self.assertEqual(indices.shape, (5, 3))
+    self.assertEqual(temporal_offset.shape, (5, 2))
+    self.assertEqual(weights.shape, (5,))
+    np.testing.assert_array_equal(
+        indices,
+        [[0, 10, 10], [0, 15, 5], [1, 11, 10], [2, 10, 10], [2, 7, 11]])
+    np.testing.assert_array_almost_equal(
+        temporal_offset,
+        [[0.5, 0.4], [-0.1, 0.1], [0.4, 0.3], [0.1, 0.1], [0.125, -0.125]])
+    np.testing.assert_array_equal(weights, 1)
+
+  def test_assign_offset_targets_with_match_flags(self):
+    """Tests the assign_offset_targets function with match flags."""
+    def graph_fn():
+      box_batch = [
+          tf.constant([self._box_center, self._box_lower_left]),
+          tf.constant([self._box_center_offset]),
+          tf.constant([self._box_center_small, self._box_odd_coordinates]),
+      ]
+
+      offset_batch = [
+          tf.constant([self._offset_center, self._offset_lower_left]),
+          tf.constant([self._offset_center_offset]),
+          tf.constant([self._offset_center_small, self._offset_odd_coord]),
+      ]
+
+      match_flag_batch = [
+          tf.constant([0.0, 1.0]),
+          tf.constant([1.0]),
+          tf.constant([1.0, 1.0]),
+      ]
+
+      cn_assigner = targetassigner.CenterNetTemporalOffsetTargetAssigner(4)
+      weights_batch = [
+          tf.constant([1.0, 0.0]),
+          tf.constant([1.0]),
+          tf.constant([1.0, 1.0])
+      ]
+      indices, temporal_offset, weights = cn_assigner.assign_temporal_offset_targets(
+          80, 80, box_batch, offset_batch, match_flag_batch, weights_batch)
+      return indices, temporal_offset, weights
+    indices, temporal_offset, weights = self.execute(graph_fn, [])
+    self.assertEqual(indices.shape, (5, 3))
+    self.assertEqual(temporal_offset.shape, (5, 2))
+    self.assertEqual(weights.shape, (5,))
+
+    np.testing.assert_array_equal(
+        indices,
+        [[0, 10, 10], [0, 15, 5], [1, 11, 10], [2, 10, 10], [2, 7, 11]])
+    np.testing.assert_array_almost_equal(
+        temporal_offset,
+        [[0.5, 0.4], [-0.1, 0.1], [0.4, 0.3], [0.1, 0.1], [0.125, -0.125]])
+    np.testing.assert_array_equal(weights, [0, 0, 1, 1, 1])
+
+
+class DETRTargetAssignerTest(test_case.TestCase):
+
+  def test_assign_detr(self):
+    def graph_fn(pred_corners, groundtruth_box_corners,
+                 groundtruth_labels, predicted_labels):
+      detr_target_assigner = targetassigner.DETRTargetAssigner()
+      pred_boxlist = box_list.BoxList(pred_corners)
+      groundtruth_boxlist = box_list.BoxList(groundtruth_box_corners)
+      result = detr_target_assigner.assign(
+          pred_boxlist, groundtruth_boxlist,
+          predicted_labels, groundtruth_labels)
+      (cls_targets, cls_weights, reg_targets, reg_weights) = result
+      return (cls_targets, cls_weights, reg_targets, reg_weights)
+
+    pred_corners = np.array([[0.25, 0.25, 0.4, 0.2],
+                             [0.5, 0.8, 1.0, 0.8],
+                             [0.9, 0.5, 0.1, 1.0]], dtype=np.float32)
+    groundtruth_box_corners = np.array([[0.0, 0.0, 0.5, 0.5],
+                                        [0.5, 0.5, 0.9, 0.9]],
+                                       dtype=np.float32)
+    predicted_labels = np.array([[-3.0, 3.0], [2.0, 9.4], [5.0, 1.0]],
+                                dtype=np.float32)
+    groundtruth_labels = np.array([[0.0, 1.0], [0.0, 1.0]],
+                                  dtype=np.float32)
+
+    exp_cls_targets = [[0, 1], [0, 1], [1, 0]]
+    exp_cls_weights = [[1, 1], [1, 1], [1, 1]]
+    exp_reg_targets = [[0.25, 0.25, 0.5, 0.5],
+                       [0.7, 0.7, 0.4, 0.4],
+                       [0, 0, 0, 0]]
+    exp_reg_weights = [1, 1, 0]
+
+    (cls_targets_out,
+     cls_weights_out, reg_targets_out, reg_weights_out) = self.execute_cpu(
+         graph_fn, [pred_corners, groundtruth_box_corners,
+                    groundtruth_labels, predicted_labels])
+
+    self.assertAllClose(cls_targets_out, exp_cls_targets)
+    self.assertAllClose(cls_weights_out, exp_cls_weights)
+    self.assertAllClose(reg_targets_out, exp_reg_targets)
+    self.assertAllClose(reg_weights_out, exp_reg_weights)
+    self.assertEqual(cls_targets_out.dtype, np.float32)
+    self.assertEqual(cls_weights_out.dtype, np.float32)
+    self.assertEqual(reg_targets_out.dtype, np.float32)
+    self.assertEqual(reg_weights_out.dtype, np.float32)
+
+  def test_batch_assign_detr(self):
+    def graph_fn(pred_corners, groundtruth_box_corners,
+                 groundtruth_labels, predicted_labels):
+      detr_target_assigner = targetassigner.DETRTargetAssigner()
+      result = detr_target_assigner.batch_assign(
+          pred_corners, groundtruth_box_corners,
+          [predicted_labels], [groundtruth_labels])
+      (cls_targets, cls_weights, reg_targets, reg_weights) = result
+      return (cls_targets, cls_weights, reg_targets, reg_weights)
+
+    pred_corners = np.array([[[0.25, 0.25, 0.4, 0.2],
+                              [0.5, 0.8, 1.0, 0.8],
+                              [0.9, 0.5, 0.1, 1.0]]], dtype=np.float32)
+    groundtruth_box_corners = np.array([[[0.0, 0.0, 0.5, 0.5],
+                                         [0.5, 0.5, 0.9, 0.9]]],
+                                       dtype=np.float32)
+    predicted_labels = np.array([[-3.0, 3.0], [2.0, 9.4], [5.0, 1.0]],
+                                dtype=np.float32)
+    groundtruth_labels = np.array([[0.0, 1.0], [0.0, 1.0]],
+                                  dtype=np.float32)
+
+    exp_cls_targets = [[[0, 1], [0, 1], [1, 0]]]
+    exp_cls_weights = [[[1, 1], [1, 1], [1, 1]]]
+    exp_reg_targets = [[[0.25, 0.25, 0.5, 0.5],
+                        [0.7, 0.7, 0.4, 0.4],
+                        [0, 0, 0, 0]]]
+    exp_reg_weights = [[1, 1, 0]]
+
+    (cls_targets_out,
+     cls_weights_out, reg_targets_out, reg_weights_out) = self.execute_cpu(
+         graph_fn, [pred_corners, groundtruth_box_corners,
+                    groundtruth_labels, predicted_labels])
+
+    self.assertAllClose(cls_targets_out, exp_cls_targets)
+    self.assertAllClose(cls_weights_out, exp_cls_weights)
+    self.assertAllClose(reg_targets_out, exp_reg_targets)
+    self.assertAllClose(reg_weights_out, exp_reg_weights)
+    self.assertEqual(cls_targets_out.dtype, np.float32)
+    self.assertEqual(cls_weights_out.dtype, np.float32)
+    self.assertEqual(reg_targets_out.dtype, np.float32)
+    self.assertEqual(reg_weights_out.dtype, np.float32)
 
 
 if __name__ == '__main__':

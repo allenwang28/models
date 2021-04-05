@@ -46,7 +46,10 @@ class Delg(delf_model.Delf):
                gem_power=3.0,
                embedding_layer_dim=2048,
                scale_factor_init=45.25,  # sqrt(2048)
-               arcface_margin=0.1):
+               arcface_margin=0.1,
+               use_dim_reduction=False,
+               reduced_dimension=128,
+               dim_expand_channels=1024):
     """Initialization of DELG model.
 
     Args:
@@ -56,6 +59,14 @@ class Delg(delf_model.Delf):
       embedding_layer_dim : int, dimension of the embedding layer.
       scale_factor_init: float.
       arcface_margin: float, ArcFace margin.
+      use_dim_reduction: Whether to integrate dimensionality reduction layers.
+        If True, extra layers are added to reduce the dimensionality of the
+        extracted features.
+      reduced_dimension: Only used if use_dim_reduction is True, the output
+        dimension of the dim_reduction layer.
+      dim_expand_channels: Only used if use_dim_reduction is True, the
+        number of channels of the backbone block used. Default value 1024 is the
+        number of channels of backbone block 'block3'.
     """
     logging.info('Creating Delg model, gem_power %d, embedding_layer_dim %d',
                  gem_power, embedding_layer_dim)
@@ -64,7 +75,10 @@ class Delg(delf_model.Delf):
                                pooling='gem',
                                gem_power=gem_power,
                                embedding_layer=True,
-                               embedding_layer_dim=embedding_layer_dim)
+                               embedding_layer_dim=embedding_layer_dim,
+                               use_dim_reduction=use_dim_reduction,
+                               reduced_dimension=reduced_dimension,
+                               dim_expand_channels=dim_expand_channels)
     self._embedding_layer_dim = embedding_layer_dim
     self._scale_factor_init = scale_factor_init
     self._arcface_margin = arcface_margin
@@ -107,7 +121,7 @@ def cosine_classifier_logits(prelogits,
   """Compute cosine classifier logits using ArFace margin.
 
   Args:
-    prelogits: float tensor of shape [batch_size, 1, 1, embedding_layer_dim].
+    prelogits: float tensor of shape [batch_size, embedding_layer_dim].
     labels: int tensor of shape [batch_size].
     num_classes: int, number of classes.
     cosine_weights: float tensor of shape [embedding_layer_dim, num_classes].
@@ -118,11 +132,8 @@ def cosine_classifier_logits(prelogits,
   Returns:
     logits: Float tensor [batch_size, num_classes].
   """
-  # Reshape from [batch_size, 1, 1, depth] to [batch_size, depth].
-  squeezed_prelogits = tf.squeeze(prelogits, [1, 2])
-
   # L2-normalize prelogits, then obtain cosine similarity.
-  normalized_prelogits = tf.math.l2_normalize(squeezed_prelogits, axis=1)
+  normalized_prelogits = tf.math.l2_normalize(prelogits, axis=1)
   normalized_weights = tf.math.l2_normalize(cosine_weights, axis=0)
   cosine_sim = tf.matmul(normalized_prelogits, normalized_weights)
 

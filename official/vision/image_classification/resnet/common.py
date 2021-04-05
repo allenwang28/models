@@ -1,4 +1,4 @@
-# Copyright 2018 The TensorFlow Authors. All Rights Reserved.
+# Copyright 2021 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# ==============================================================================
+
 """Common util functions and classes used by both keras cifar and imagenet."""
 from __future__ import absolute_import
 from __future__ import division
@@ -351,6 +351,13 @@ def define_pruning_flags():
   flags.DEFINE_integer('pruning_begin_step', 0, 'Begin step for pruning.')
   flags.DEFINE_integer('pruning_end_step', 100000, 'End step for pruning.')
   flags.DEFINE_integer('pruning_frequency', 100, 'Frequency for pruning.')
+
+
+def define_clustering_flags():
+  """Define flags for clustering methods."""
+  flags.DEFINE_string('clustering_method', None,
+                      'None (no clustering) or selective_clustering '
+                      '(cluster last three Conv2D layers of the model).')
 
 
 def get_synth_input_fn(height,

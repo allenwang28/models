@@ -1,4 +1,4 @@
-# Copyright 2018 The TensorFlow Authors. All Rights Reserved.
+# Copyright 2021 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# ==============================================================================
+
 """Common functionalities used by both Keras and Estimator implementations."""
 
 from __future__ import absolute_import
@@ -21,21 +21,17 @@ from __future__ import print_function
 import json
 import os
 
-# pylint: disable=g-bad-import-order
-
-import numpy as np
 from absl import flags
 from absl import logging
+import numpy as np
 import tensorflow as tf
-# pylint: enable=g-bad-import-order
 
+from official.common import distribute_utils
 from official.recommendation import constants as rconst
 from official.recommendation import data_pipeline
 from official.recommendation import data_preprocessing
 from official.recommendation import movielens
 from official.utils.flags import core as flags_core
-from official.utils.misc import distribution_utils
-from official.utils.misc import keras_utils
 
 FLAGS = flags.FLAGS
 
@@ -138,11 +134,11 @@ def get_v1_distribution_strategy(params):
     }
     os.environ["TF_CONFIG"] = json.dumps(tf_config_env)
 
-    distribution = tf.distribute.experimental.TPUStrategy(
+    distribution = tf.distribute.TPUStrategy(
         tpu_cluster_resolver, steps_per_run=100)
 
   else:
-    distribution = distribution_utils.get_distribution_strategy(
+    distribution = distribute_utils.get_distribution_strategy(
         num_gpus=params["num_gpus"])
 
   return distribution

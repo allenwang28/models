@@ -1,4 +1,4 @@
-# Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+# Copyright 2021 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,13 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# ==============================================================================
-"""XLNet classification finetuning runner in tf2.0."""
 
-from __future__ import absolute_import
-from __future__ import division
-# from __future__ import google_type_annotations
-from __future__ import print_function
+"""XLNet classification finetuning runner in tf2.0."""
 
 import functools
 # Import libraries
@@ -28,13 +23,13 @@ from absl import logging
 import numpy as np
 import tensorflow as tf
 # pylint: disable=unused-import
+from official.common import distribute_utils
 from official.nlp.xlnet import common_flags
 from official.nlp.xlnet import data_utils
 from official.nlp.xlnet import optimization
 from official.nlp.xlnet import training_utils
 from official.nlp.xlnet import xlnet_config
 from official.nlp.xlnet import xlnet_modeling as modeling
-from official.utils.misc import tpu_lib
 
 flags.DEFINE_integer("n_class", default=2, help="Number of classes.")
 flags.DEFINE_string(
@@ -135,14 +130,9 @@ def get_metric_fn():
 
 def main(unused_argv):
   del unused_argv
-  if FLAGS.strategy_type == "mirror":
-    strategy = tf.distribute.MirroredStrategy()
-  elif FLAGS.strategy_type == "tpu":
-    cluster_resolver = tpu_lib.tpu_initialize(FLAGS.tpu)
-    strategy = tf.distribute.experimental.TPUStrategy(cluster_resolver)
-  else:
-    raise ValueError("The distribution strategy type is not supported: %s" %
-                     FLAGS.strategy_type)
+  strategy = distribute_utils.get_distribution_strategy(
+      distribution_strategy=FLAGS.strategy_type,
+      tpu_address=FLAGS.tpu)
   if strategy:
     logging.info("***** Number of cores used : %d",
                  strategy.num_replicas_in_sync)

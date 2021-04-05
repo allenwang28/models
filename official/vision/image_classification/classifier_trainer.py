@@ -1,5 +1,4 @@
-# Lint as: python3
-# Copyright 2018 The TensorFlow Authors. All Rights Reserved.
+# Copyright 2021 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,7 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# ==============================================================================
+
+# Lint as: python3
 """Runs an Image Classification model."""
 
 import os
@@ -23,11 +23,10 @@ from absl import app
 from absl import flags
 from absl import logging
 import tensorflow as tf
-
+from official.common import distribute_utils
 from official.modeling import hyperparams
 from official.modeling import performance
 from official.utils import hyperparams_flags
-from official.utils.misc import distribution_utils
 from official.utils.misc import keras_utils
 from official.vision.image_classification import callbacks as custom_callbacks
 from official.vision.image_classification import dataset_factory
@@ -229,7 +228,7 @@ def initialize(params: base_configs.ExperimentConfig,
   """Initializes backend related initializations."""
   keras_utils.set_session_config(enable_xla=params.runtime.enable_xla)
   performance.set_mixed_precision_policy(dataset_builder.dtype,
-                                         get_loss_scale(params))
+                                         use_experimental_api=False)
   if tf.config.list_physical_devices('GPU'):
     data_format = 'channels_first'
   else:
@@ -291,17 +290,17 @@ def train_and_eval(
   """Runs the train and eval path using compile/fit."""
   logging.info('Running train and eval.')
 
-  distribution_utils.configure_cluster(params.runtime.worker_hosts,
-                                       params.runtime.task_index)
+  distribute_utils.configure_cluster(params.runtime.worker_hosts,
+                                     params.runtime.task_index)
 
   # Note: for TPUs, strategy and scope should be created before the dataset
-  strategy = strategy_override or distribution_utils.get_distribution_strategy(
+  strategy = strategy_override or distribute_utils.get_distribution_strategy(
       distribution_strategy=params.runtime.distribution_strategy,
       all_reduce_alg=params.runtime.all_reduce_alg,
       num_gpus=params.runtime.num_gpus,
       tpu_address=params.runtime.tpu)
 
-  strategy_scope = distribution_utils.get_strategy_scope(strategy)
+  strategy_scope = distribute_utils.get_strategy_scope(strategy)
 
   logging.info('Detected %d devices.',
                strategy.num_replicas_in_sync if strategy else 1)
@@ -339,6 +338,11 @@ def train_and_eval(
         base_learning_rate=learning_rate,
         params=params.model.optimizer.as_dict(),
         model=model)
+    optimizer = performance.configure_optimizer(
+        optimizer,
+        use_float16=train_builder.dtype == 'float16',
+        loss_scale=get_loss_scale(params),
+        use_experimental_api=True)
 
     metrics_map = _get_metrics(one_hot)
     metrics = [metrics_map[metric] for metric in params.train.metrics]
@@ -353,7 +357,7 @@ def train_and_eval(
         optimizer=optimizer,
         loss=loss_obj,
         metrics=metrics,
-        experimental_steps_per_execution=steps_per_loop)
+        steps_per_execution=steps_per_loop)
 
     initial_epoch = 0
     if params.train.resume_checkpoint:
@@ -369,7 +373,8 @@ def train_and_eval(
         initial_step=initial_epoch * train_steps,
         batch_size=train_builder.global_batch_size,
         log_steps=params.train.time_history.log_steps,
-        model_dir=params.model_dir)
+        model_dir=params.model_dir,
+        backup_and_restore=params.train.callbacks.enable_backup_and_restore)
 
   serialize_config(params=params, model_dir=params.model_dir)
 
