@@ -478,7 +478,7 @@ class DatasetBuilder:
           cycle_length=N,
           num_parallel_calls=N,
           deterministic=False)
-      dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+    dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
 
     return dataset
 
