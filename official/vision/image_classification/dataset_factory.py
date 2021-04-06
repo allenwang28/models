@@ -466,7 +466,7 @@ class DatasetBuilder:
         raise ValueError('The tf_data_service flag requires Tensorflow version '
                          '>= 2.3.0, but the version is {}'.format(
                              tf.__version__))
-      if True:
+      if False:
         dataset = dataset.apply(
           tf.data.experimental.service.distribute(
               processing_mode='parallel_epochs',
