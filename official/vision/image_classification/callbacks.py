@@ -57,7 +57,7 @@ def get_callbacks(
     callbacks.append(
         tf.keras.callbacks.TensorBoard(
             log_dir=model_dir,
-            profile_batch=1))
+            profile_batch=0))
   if time_history:
     callbacks.append(
         keras_utils.TimeHistory(
