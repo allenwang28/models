@@ -36,6 +36,7 @@ from official.vision.image_classification.configs import configs
 from official.vision.image_classification.efficientnet import efficientnet_model
 from official.vision.image_classification.resnet import common
 from official.vision.image_classification.resnet import resnet_model
+from cloud_tpu_client import Client
 
 
 def get_models() -> Mapping[str, tf.keras.Model]:
@@ -454,5 +455,7 @@ if __name__ == '__main__':
   flags.mark_flag_as_required('mode')
   flags.mark_flag_as_required('model_type')
   flags.mark_flag_as_required('dataset')
+  c = Client()
+  c.configure_tpu_version(tf.__version__, restart_type='always')
 
   app.run(main)
