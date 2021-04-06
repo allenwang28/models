@@ -466,18 +466,25 @@ class DatasetBuilder:
         raise ValueError('The tf_data_service flag requires Tensorflow version '
                          '>= 2.3.0, but the version is {}'.format(
                              tf.__version__))
-      N = 8
-      range_dataset = tf.data.Dataset.range(N)
-      dataset = range_dataset.map(lambda i: dataset.apply(
-        tf.data.experimental.service.distribute(
-          processing_mode='parallel_epochs',
-          service=self.config.tf_data_service,
-          job_name='resnet_train')))
-      dataset = dataset.interleave(
-          lambda x: x,
-          cycle_length=N,
-          num_parallel_calls=N,
-          deterministic=False)
+      if True:
+        dataset = dataset.apply(
+          tf.data.experimental.service.distribute(
+              processing_mode='parallel_epochs',
+              service=self.config.tf_data_service,
+              job_name='resnet_train'))
+      else:
+        N = 8
+        range_dataset = tf.data.Dataset.range(N)
+        dataset = range_dataset.map(lambda i: dataset.apply(
+          tf.data.experimental.service.distribute(
+            processing_mode='parallel_epochs',
+            service=self.config.tf_data_service,
+            job_name='resnet_train')))
+        dataset = dataset.interleave(
+            lambda x: x,
+            cycle_length=N,
+            num_parallel_calls=N,
+            deterministic=False)
     dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
 
     return dataset
