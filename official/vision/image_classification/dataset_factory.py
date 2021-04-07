@@ -459,7 +459,7 @@ class DatasetBuilder:
           self.global_batch_size, drop_remainder=self.is_training)
 
     # Prefetch overlaps in-feed with training
-    #dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
+    dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
     if self.config.tf_data_service:
       if not hasattr(tf.data.experimental, 'service'):
