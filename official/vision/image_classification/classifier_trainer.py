@@ -455,7 +455,9 @@ if __name__ == '__main__':
   flags.mark_flag_as_required('mode')
   flags.mark_flag_as_required('model_type')
   flags.mark_flag_as_required('dataset')
+  """
   c = Client()
   c.configure_tpu_version(tf.__version__, restart_type='always')
+  """
 
   app.run(main)
