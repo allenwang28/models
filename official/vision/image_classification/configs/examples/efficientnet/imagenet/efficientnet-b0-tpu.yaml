@@ -12,10 +12,9 @@ train_dataset:
   num_classes: 1000
   num_examples: 1281167
   batch_size: 128
+  image_size: 600
   use_per_replica_batch_size: True
   dtype: 'bfloat16'
-  augmenter:
-    name: 'autoaugment'
 validation_dataset:
   name: 'imagenet2012'
   data_dir: null
@@ -23,6 +22,7 @@ validation_dataset:
   split: 'validation'
   num_classes: 1000
   num_examples: 50000
+  image_size: 600
   batch_size: 128
   use_per_replica_batch_size: True
   dtype: 'bfloat16'
@@ -34,6 +34,7 @@ model:
       batch_norm: 'tpu'
       dtype: 'bfloat16'
       activation: 'swish'
+      resolution: 600
   optimizer:
     name: 'rmsprop'
     momentum: 0.9
