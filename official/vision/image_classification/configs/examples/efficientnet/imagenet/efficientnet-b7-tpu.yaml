@@ -14,8 +14,6 @@ train_dataset:
   batch_size: 128
   use_per_replica_batch_size: True
   dtype: 'bfloat16'
-  augmenter:
-    name: 'autoaugment'
 validation_dataset:
   name: 'imagenet2012'
   data_dir: null
