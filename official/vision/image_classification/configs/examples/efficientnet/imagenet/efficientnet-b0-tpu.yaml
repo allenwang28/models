@@ -12,7 +12,7 @@ train_dataset:
   num_classes: 1000
   num_examples: 1281167
   batch_size: 128
-  image_size: 600
+  image_size: 800
   use_per_replica_batch_size: True
   dtype: 'bfloat16'
 validation_dataset:
@@ -22,7 +22,7 @@ validation_dataset:
   split: 'validation'
   num_classes: 1000
   num_examples: 50000
-  image_size: 600
+  image_size: 800
   batch_size: 128
   use_per_replica_batch_size: True
   dtype: 'bfloat16'
