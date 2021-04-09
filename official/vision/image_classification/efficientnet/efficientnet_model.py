@@ -96,7 +96,7 @@ class ModelConfig(base_config.Config):
 
 MODEL_CONFIGS = {
     # (width, depth, resolution, dropout)
-    'efficientnet-b0': ModelConfig.from_args(1.0, 1.0, 224, 0.2),
+    'efficientnet-b0': ModelConfig.from_args(1.0, 1.0, 600, 0.2),
     'efficientnet-b1': ModelConfig.from_args(1.0, 1.1, 240, 0.2),
     'efficientnet-b2': ModelConfig.from_args(1.1, 1.2, 260, 0.3),
     'efficientnet-b3': ModelConfig.from_args(1.2, 1.4, 300, 0.3),
