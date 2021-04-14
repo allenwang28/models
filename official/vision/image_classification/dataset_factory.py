@@ -479,7 +479,8 @@ class DatasetBuilder:
           tf.data.experimental.service.distribute(
             processing_mode='parallel_epochs',
             service=self.config.tf_data_service,
-            job_name='resnet_train')))
+            job_name='resnet_train',
+            compression=None)))
         dataset = dataset.interleave(
             lambda x: x,
             cycle_length=N,
